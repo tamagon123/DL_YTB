@@ -7,9 +7,36 @@ import sys
 import urllib.request
 import subprocess
 
+import platform
+
+# --- ローカルPCのダウンロードフォルダを取得する関数 ---
+def get_default_download_folder():
+    if platform.system() == "Windows":
+        import ctypes.wintypes
+        CSIDL_PERSONAL = 0x0005       # My Documents
+        SHGFP_TYPE_CURRENT = 0
+        buf = ctypes.create_unicode_buffer(260)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x000C, None, 0, buf) == 0:
+            # 0x000C = CSIDL_MYDOCUMENTS (actually Downloads is 0x000C for Vista+)
+            download = buf.value
+        else:
+            # fallback: get from user profile
+            download = os.path.join(os.environ.get("USERPROFILE", os.getcwd()), "Downloads")
+        # Confirm the folder exists, otherwise fallback
+        if os.path.exists(download):
+            return download
+        # fallback
+        return os.path.join(os.environ.get("USERPROFILE", os.getcwd()), "Downloads")
+    elif platform.system() == "Darwin":
+        return os.path.join(os.path.expanduser('~'), 'Downloads')
+    else:
+        # Linux and others
+        xdg = os.path.expanduser('~/Downloads')
+        return xdg
+
 # --- あなたのGitHubの最新exe配布用URLを設定してください ---
 # 例: "https://github.com/YourName/YourRepo/releases/latest/download/YoutubeDownloader.exe"
-GITHUB_EXE_URL = "https://ここにGitHubの直リンクを貼る"
+GITHUB_EXE_URL = "https://github.com/tamagon123/DL_YTB/blob/main/dist/YoutubeDownloader.exe"
 
 
 # --- ヘルプ画面のクラス ---
@@ -17,7 +44,7 @@ class HelpWindow(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("ヘルプ・使い方")
-        self.geometry("600x450")
+        self.geometry("600x540")
         self.attributes("-topmost", True)
         
         text_area = tk.Text(self, padx=15, pady=15, font=("MS Gothic", 10), wrap="word")
@@ -25,30 +52,33 @@ class HelpWindow(tk.Toplevel):
         
         help_text = """【YouTube Pro Downloader 使い方マニュアル】
 
-1. 基本操作
-・URL欄に動画リンクを貼り付けるか、一番右の「🔍検索」ボタンで動画を探してください。
-・URLを入力してEnterを押すと、自動で動画タイトルを取得し保存名にセットします。
+■ 1. URL入力と検索
+・URL欄にYouTubeまたは他対応サイトの動画URLを貼り付けるか、「🔍 YouTube検索」ボタンで動画を探してください。
+・「🔍 YouTube検索」から検索した動画を選んだ場合、自動でURLがセットされます。
 
-2. 保存名のリネーム
-・「保存名」の欄に入力すると、その名前で保存されます。
-・空欄（グレーの文字の状態）の場合は、YouTubeのタイトルがそのまま使われます。
+■ 2. 保存名の設定
+・「保存名(空でタイトル)」の欄に任意の名前を入力するとその名前で保存されます。
+・何も入力しない・またはグレー文字のままの場合は、動画タイトルがファイル名となります。
+・URL欄にYouTube等の動画URLを入力しフォーカスが外れると、自動で保存名にタイトルが反映されます。
 
-3. 画質・モード選択
-・動画：最高画質、1080p、720p、および音声(MP3)が選択可能です。
-※1080p以上の保存には、プログラムと同じフォルダに「ffmpeg.exe」が必要です。
+■ 3. ダウンロード形式の選択
+・「動画:最高画質」「動画:1080p」「動画:720p」「音源:MP3」から選択可能です(初期値は最高画質)。
+・1080p以上や音声抽出(MP3)の場合、ffmpeg.exeが同じフォルダに必要です。
 
-4. キーボードショートカット
+■ 4. 保存先フォルダの指定
+・上部「保存フォルダ」に直接パスを入力するか、「参照」ボタンから選択できます。
+・「開く」ボタンでエクスプローラーでフォルダを開きます。
+
+■ 5. 複数動画のバッチダウンロード
+・最大10件まで同時に入力できます。全て設定後、一番下「一括ダウンロード開始」ボタンを押してください。
+・ダウンロードが完了したら自動で入力欄がリセットされます。
+
+■ 6. キーボードショートカット
 ・Tabキー：次の項目へ移動
 ・Enterキー：入力の確定、または次の入力欄へ移動
 ・ボタンが選択された状態でEnter：クリックと同じ動作
 
-5. トラブルシューティング
-・「HTTP Error 403: Forbidden」が出る場合：
-  YouTubeの仕様変更が原因です。コマンドプロンプトで 
-  pip install -U yt-dlp 
-  を実行して最新版に更新してください。
-・ダウンロードが始まらない：
-  インターネット接続と、ffmpeg.exeが同フォルダにあるか確認してください。
+※その他サポートサイト等はGitHubページをご覧ください。
 """
         text_area.insert("1.0", help_text)
         text_area.config(state="disabled") # 編集不可にする
@@ -201,7 +231,7 @@ class MainApp:
         # --- 1. 上部パネル (保存先 & アップデートボタン) ---
         top_frame = tk.Frame(root, padx=20, pady=15)
         top_frame.pack(fill="x")
-        self.save_dir = tk.StringVar(value=os.getcwd())
+        self.save_dir = tk.StringVar(value=get_default_download_folder())
         tk.Label(top_frame, text="保存フォルダ:").pack(side="left")
         self.path_entry = tk.Entry(top_frame, textvariable=self.save_dir, width=80)
         self.path_entry.pack(side="left", padx=10)
@@ -211,15 +241,15 @@ class MainApp:
         self.open_btn = tk.Button(top_frame, text="開く", command=self.open_folder, width=8)
         self.open_btn.pack(side="left", padx=2)
 
-        # 【GitHubからのアップデートボタン】
-        self.update_btn = tk.Button(top_frame, text="アプリ更新", command=self.check_update, 
-                                    bg="#4CAF50", fg="white", font=("MS Gothic", 9, "bold"))
-        self.update_btn.pack(side="left", padx=10)
-        
         # --- ヘルプボタンを追加 ---
         self.help_btn = tk.Button(top_frame, text="ヘルプ", command=self.open_help, bg="#f0f0f0", width=6)
         self.help_btn.pack(side="left", padx=10)
 
+        # 【GitHubからのアップデートボタン】一番右に移動
+        self.update_btn = tk.Button(top_frame, text="アプリ更新", command=self.check_update, 
+                                    bg="#4CAF50", fg="white", font=("MS Gothic", 9, "bold"))
+        self.update_btn.pack(side="right", padx=10)
+        
         # 2. スクロールエリア (10行分をぴったり表示)
         canvas_container = tk.Frame(root, padx=20)
         canvas_container.pack(fill="both", expand=True)
