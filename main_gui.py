@@ -37,7 +37,7 @@ def get_default_download_folder():
 # --- あなたのGitHubの最新exe配布用URLを設定してください ---
 # 例: "https://github.com/YourName/YourRepo/releases/latest/download/YoutubeDownloader.exe"
 # 直リンク（Raw）にする場合
-GITHUB_EXE_URL = "https://github.com/tamagon123/DL_YTB/raw/main/dist/YoutubeDownloader.exe"
+GITHUB_EXE_URL = "https://github.com/tamagon123/DL_YTB/?raw=true/main/dist/YoutubeDownloader.exe"
 
 # --- ヘルプ画面のクラス ---
 class HelpWindow(tk.Toplevel):
