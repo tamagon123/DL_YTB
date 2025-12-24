@@ -3,6 +3,14 @@ from tkinter import ttk, messagebox, filedialog
 import yt_dlp
 import threading
 import os
+import sys
+import urllib.request
+import subprocess
+
+# --- あなたのGitHubの最新exe配布用URLを設定してください ---
+# 例: "https://github.com/YourName/YourRepo/releases/latest/download/YoutubeDownloader.exe"
+GITHUB_EXE_URL = "https://ここにGitHubの直リンクを貼る"
+
 
 # --- ヘルプ画面のクラス ---
 class HelpWindow(tk.Toplevel):
@@ -190,7 +198,7 @@ class MainApp:
         self.root = root
         self.root.title("YouTube Pro Downloader v6")
         
-        # 1. 保存先設定エリア
+        # --- 1. 上部パネル (保存先 & アップデートボタン) ---
         top_frame = tk.Frame(root, padx=20, pady=15)
         top_frame.pack(fill="x")
         self.save_dir = tk.StringVar(value=os.getcwd())
@@ -202,6 +210,11 @@ class MainApp:
         self.ref_btn.pack(side="left", padx=2)
         self.open_btn = tk.Button(top_frame, text="開く", command=self.open_folder, width=8)
         self.open_btn.pack(side="left", padx=2)
+
+        # 【GitHubからのアップデートボタン】
+        self.update_btn = tk.Button(top_frame, text="アプリ更新", command=self.check_update, 
+                                    bg="#4CAF50", fg="white", font=("MS Gothic", 9, "bold"))
+        self.update_btn.pack(side="left", padx=10)
         
         # --- ヘルプボタンを追加 ---
         self.help_btn = tk.Button(top_frame, text="ヘルプ", command=self.open_help, bg="#f0f0f0", width=6)
@@ -242,6 +255,41 @@ class MainApp:
         # ウィンドウの最小サイズを設定 (切れないように)
         self.root.update_idletasks()
         self.root.minsize(1050, 550)
+        
+        
+    # --- 自己アップデートのロジック ---
+    def check_update(self):
+        if not messagebox.askyesno("確認", "GitHubから最新版のアプリをダウンロードして更新しますか？\n(現在のアプリは一度終了します)"):
+            return
+        self.update_btn.config(state="disabled", text="更新中...")
+        threading.Thread(target=self._perform_update, daemon=True).start()
+
+    def _perform_update(self):
+        try:
+            current_exe = sys.executable  # 現在のexeのフルパス
+            new_exe = current_exe + ".new"
+            bat_file = "updater.bat"
+
+            # 1. 新しいexeをGitHubからダウンロード
+            urllib.request.urlretrieve(GITHUB_EXE_URL, new_exe)
+
+            # 2. 入れ替え用のバッチファイルを作成
+            # 自分を消して、新しいのを自分にリネームして、自分を起動する
+            with open(bat_file, "w", encoding="shift-jis") as f:
+                f.write(f'@echo off\n')
+                f.write(f'timeout /t 2 > nul\n') # アプリが完全に閉じるのを待つ
+                f.write(f'del "{current_exe}"\n')
+                f.write(f'ren "{new_exe}" "{os.path.basename(current_exe)}"\n')
+                f.write(f'start "" "{current_exe}"\n')
+                f.write(f'del "{bat_file}"\n')
+
+            # 3. バッチファイルを起動して、自分は即終了する
+            subprocess.Popen([bat_file], shell=True)
+            self.root.after(0, self.root.quit)
+
+        except Exception as e:
+            messagebox.showerror("更新失敗", f"GitHubからの更新に失敗しました:\n{e}")
+            self.after(0, lambda: self.update_btn.config(state="normal", text="アプリ更新"))
 
     def select_folder(self):
         p = filedialog.askdirectory()
@@ -317,5 +365,3 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = MainApp(root)
     root.mainloop()
-
-    #aaaa
