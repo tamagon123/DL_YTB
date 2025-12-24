@@ -427,5 +427,11 @@ class MainApp:
 
 if __name__ == "__main__":
     root = tk.Tk()
+
+    try:
+        root.iconbitmap("icon.ico")
+    except:
+        pass # アイコンがない場合にエラーで落ちるのを防ぐ
+
     app = MainApp(root)
     root.mainloop()
