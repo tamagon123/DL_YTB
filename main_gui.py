@@ -36,7 +36,8 @@ def get_default_download_folder():
 
 # --- あなたのGitHubの最新exe配布用URLを設定してください ---
 # 例: "https://github.com/YourName/YourRepo/releases/latest/download/YoutubeDownloader.exe"
-GITHUB_EXE_URL = "https://github.com/tamagon123/DL_YTB/blob/main/dist/YoutubeDownloader.exe"
+# 直リンク（Raw）にする場合
+GITHUB_EXE_URL = "https://github.com/tamagon123/DL_YTB/raw/main/dist/YoutubeDownloader.exe"
 
 # --- ヘルプ画面のクラス ---
 class HelpWindow(tk.Toplevel):
@@ -337,10 +338,13 @@ class MainApp:
         self.p_win.attributes("-topmost", True)
         self.p_label = tk.Label(self.p_win, text="準備中...", pady=15, padx=30)
         self.p_label.pack()
-        self.p_bar = ttk.Progressbar(self.p_win, length=350, mode='determinate')
+        self.p_bar = ttk.Progressbar(self.p_win, length=350, mode='determinate', maximum=100)
         self.p_bar.pack(pady=15, padx=30)
 
         self.dl_btn.config(state="disabled")
+        self._current_task_index = 0
+        self._num_tasks = len([r for r in self.rows if r.url_entry.get().strip()])
+        self._progress_values = [0] * self._num_tasks  # 進捗を保持する
         threading.Thread(target=self.execute, daemon=True).start()
 
     def execute(self):
@@ -356,8 +360,11 @@ class MainApp:
                 self.after_all()
                 return
 
-        # yt_dlpのuseragentは現状使わない方がよい（無効値でダウンロード失敗する可能性あり）
-        for r in self.rows:
+        # 有効なURL行だけ抽出しつつindex番号も付加
+        valid_rows = [(i, r) for i, r in enumerate(self.rows) if r.url_entry.get().strip()]
+        task_count = len(valid_rows)
+        for idx, (row_idx, r) in enumerate(valid_rows):
+            self._current_task_index = idx
             url = r.url_entry.get().strip()
             if not url:
                 continue
@@ -365,16 +372,14 @@ class MainApp:
             if name == r.placeholder: name = ""
 
             mode = r.mode_combo.get()
-
-            # yt-dlp optionの構築
             outtmpl = os.path.join(save_path, f"{name if name else '%(title)s'}.%(ext)s")
 
             opts = {
-                'progress_hooks': [self._hook],
+                'progress_hooks': [lambda d, idx=idx: self._hook(d, idx, task_count)],
                 'outtmpl': outtmpl,
                 'nocheckcertificate': True,
-                'quiet': True,
-                # 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...',
+                # 'quiet': True,  # 進捗が取れない場合があるためコメントアウトまたはFalseを推奨
+                'no_warnings': True,
             }
             if "音源" in mode:
                 opts.update({
@@ -391,7 +396,6 @@ class MainApp:
                 elif "720p" in mode:
                     fmt = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/bestvideo[height<=720]+bestaudio/best[height<=720]"
                 else:
-                    # "最高画質"
                     fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best"
                 opts.update({'format': fmt, 'merge_output_format': 'mp4'})
 
@@ -399,23 +403,65 @@ class MainApp:
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     ydl.download([url])
             except Exception as e:
-                # 詳細エラー表示し、all_successをFalse
                 all_success = False
-                self.p_label.config(text=f"エラー: {str(e)}")
+                # メインスレッドでエラーを表示
+                self.root.after(0, lambda msg=str(e): self.update_progress_label(f"エラー: {msg}"))
 
-        self.after_all(all_success)
+        self.root.after(0, lambda success=all_success: self.after_all(success))
 
-    def _hook(self, d):
+    def _hook(self, d, task_idx, total_tasks):
+        # d: yt-dlpが進捗報告する辞書
         if d['status'] == 'downloading':
-            p = d.get('_percent_str', '0%')
-            self.p_label.config(text=f"処理中...\n進捗: {p}")
-            try: self.p_bar['value'] = float(p.replace('%', ''))
-            except: pass
+            # 文字列解析ではなく数値から計算する
+            downloaded = d.get('downloaded_bytes', 0)
+            total = d.get('total_bytes') or d.get('total_bytes_estimate')
+            
+            if total:
+                percent = (downloaded / total) * 100
+            else:
+                # 合計サイズが不明な場合は、文字列から抽出を試みる（フォールバック）
+                p_str = d.get('_percent_str', '0%')
+                # ANSIエスケープコードを除去して数値化
+                import re
+                clean_p_str = re.sub(r'\x1b\[[0-9;]*m', '', p_str).replace('%', '').strip()
+                try:
+                    percent = float(clean_p_str)
+                except:
+                    percent = 0            # 各ダウンロードのタスクごとに進捗を保存
+            self._progress_values[task_idx] = percent
+            # 全体の進捗を求める
+            average_progress = sum(self._progress_values) / total_tasks
+
+            label_text = f"処理中...\n[{task_idx+1}/{total_tasks}] 動画進捗: {percent:.1f}%"
+            # メインスレッドでUI更新を予約
+            self.root.after(0, self.update_progress_bar_and_label, average_progress, label_text)
+
+        elif d['status'] == 'finished':
+            # そのタスクを100%に
+            self._progress_values[task_idx] = 100
+            average_progress = sum(self._progress_values) / total_tasks
+            label_text = f"完了直前 (変換中...)\n[{task_idx+1}/{total_tasks}]"
+            self.root.after(0, self.update_progress_bar_and_label, average_progress, label_text)
+
+    def update_progress_bar_and_label(self, percent, label_text):
+        if hasattr(self, 'p_bar') and self.p_bar.winfo_exists():
+            self.p_bar['value'] = percent
+        if hasattr(self, 'p_label') and self.p_label.winfo_exists():
+            self.p_label.config(text=label_text)
+            
+    def update_progress_label(self, txt):
+        if hasattr(self, 'p_label'):
+            self.p_label.config(text=txt)
+            self.root.update_idletasks()
+
     def open_help(self):
         HelpWindow(self.root)
 
     def after_all(self, all_success=True):
-        self.p_win.destroy()
+        try:
+            self.p_win.destroy()
+        except Exception:
+            pass
         finish = tk.Toplevel(self.root)
         finish.attributes("-topmost", True)
         finish.withdraw()
