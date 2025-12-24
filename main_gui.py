@@ -38,7 +38,6 @@ def get_default_download_folder():
 # 例: "https://github.com/YourName/YourRepo/releases/latest/download/YoutubeDownloader.exe"
 GITHUB_EXE_URL = "https://github.com/tamagon123/DL_YTB/blob/main/dist/YoutubeDownloader.exe"
 
-
 # --- ヘルプ画面のクラス ---
 class HelpWindow(tk.Toplevel):
     def __init__(self, parent):
@@ -85,7 +84,6 @@ class HelpWindow(tk.Toplevel):
         
         close_btn = tk.Button(self, text="閉じる", command=self.destroy, width=15)
         close_btn.pack(pady=10)
-
 
 class SearchWindow(tk.Toplevel):
     def __init__(self, parent, callback):
@@ -331,7 +329,8 @@ class MainApp:
 
     def start_thread(self):
         tasks = [r.url_entry.get().strip() for r in self.rows if r.url_entry.get().strip()]
-        if not tasks: return messagebox.showwarning("入力なし", "URLを1つ以上入力してください")
+        if not tasks: 
+            return messagebox.showwarning("入力なし", "URLを1つ以上入力してください")
 
         self.p_win = tk.Toplevel(self.root)
         self.p_win.title("ダウンロード中")
@@ -346,29 +345,65 @@ class MainApp:
 
     def execute(self):
         save_path = self.save_dir.get()
+        all_success = True  # 1件でも失敗したらFalseにする
+
+        # 保存先フォルダを保証
+        if not os.path.isdir(save_path):
+            try:
+                os.makedirs(save_path, exist_ok=True)
+            except Exception as e:
+                messagebox.showerror("エラー", f"保存先フォルダの作成に失敗しました:\n{save_path}\n{e}")
+                self.after_all()
+                return
+
+        # yt_dlpのuseragentは現状使わない方がよい（無効値でダウンロード失敗する可能性あり）
         for r in self.rows:
             url = r.url_entry.get().strip()
-            if not url: continue
+            if not url:
+                continue
             name = r.name_entry.get().strip()
             if name == r.placeholder: name = ""
+
             mode = r.mode_combo.get()
-            
+
+            # yt-dlp optionの構築
+            outtmpl = os.path.join(save_path, f"{name if name else '%(title)s'}.%(ext)s")
+
             opts = {
                 'progress_hooks': [self._hook],
-                'outtmpl': os.path.join(save_path, f"{name if name else '%(title)s'}.%(ext)s"),
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...',
-                'nocheckcertificate': True, 'quiet': True
+                'outtmpl': outtmpl,
+                'nocheckcertificate': True,
+                'quiet': True,
+                # 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...',
             }
             if "音源" in mode:
-                opts.update({'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}]})
+                opts.update({
+                    'format': 'bestaudio/best',
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192'
+                    }]
+                })
             else:
-                f = "bestvideo[height<=1080]+bestaudio/best" if "1080p" in mode else "bestvideo[height<=720]+bestaudio/best" if "720p" in mode else "bestvideo+bestaudio/best"
-                opts.update({'format': f, 'merge_output_format': 'mp4'})
-            
+                if "1080p" in mode:
+                    fmt = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/bestvideo[height<=1080]+bestaudio/best[height<=1080]"
+                elif "720p" in mode:
+                    fmt = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/bestvideo[height<=720]+bestaudio/best[height<=720]"
+                else:
+                    # "最高画質"
+                    fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best"
+                opts.update({'format': fmt, 'merge_output_format': 'mp4'})
+
             try:
-                with yt_dlp.YoutubeDL(opts) as ydl: ydl.download([url])
-            except: pass
-        self.after_all()
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.download([url])
+            except Exception as e:
+                # 詳細エラー表示し、all_successをFalse
+                all_success = False
+                self.p_label.config(text=f"エラー: {str(e)}")
+
+        self.after_all(all_success)
 
     def _hook(self, d):
         if d['status'] == 'downloading':
@@ -376,16 +411,18 @@ class MainApp:
             self.p_label.config(text=f"処理中...\n進捗: {p}")
             try: self.p_bar['value'] = float(p.replace('%', ''))
             except: pass
-            
     def open_help(self):
         HelpWindow(self.root)
 
-    def after_all(self):
+    def after_all(self, all_success=True):
         self.p_win.destroy()
         finish = tk.Toplevel(self.root)
         finish.attributes("-topmost", True)
         finish.withdraw()
-        messagebox.showinfo("完了", "すべてのダウンロードが正常に終了しました！", parent=finish)
+        if all_success:
+            messagebox.showinfo("完了", "すべてのダウンロードが正常に終了しました！", parent=finish)
+        else:
+            messagebox.showwarning("一部失敗", "一部ダウンロードに失敗しました。詳しくは進捗表示をご確認ください。", parent=finish)
         finish.destroy()
         for r in self.rows: r.reset()
         self.dl_btn.config(state="normal")
